@@ -1,0 +1,31 @@
+{
+  "name": "phamphugia-fe",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@handsontable/vue3": "^16.2.0",
+    "@tinymce/tinymce-vue": "^6.3.0",
+    "axios": "^1.13.5",
+    "handsontable": "^16.2.0",
+    "tinymce": "^8.3.2",
+    "vue": "^3.5.24",
+    "vue-router": "^4.6.4",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^24.10.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "@vue/tsconfig": "0.7.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "vue-tsc": "^3.1.4"
+  }
+}
