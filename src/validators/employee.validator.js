@@ -1,0 +1,41 @@
+const { body } = require('express-validator');
+
+exports.createEmployeeRules = [
+  body('employee_code').notEmpty().withMessage('Mã nhân viên không được để trống'),
+  body('full_name').notEmpty().withMessage('Họ tên không được để trống'),
+  body('date_of_birth').optional().isDate().withMessage('Ngày sinh không hợp lệ'),
+  body('gender').optional().isIn(['male', 'female', 'other']),
+  body('id_card_number').optional().isString(),
+  body('phone').optional().isString(),
+  body('email').optional().isEmail().withMessage('Email không hợp lệ'),
+  body('address').optional().isString(),
+  body('permanent_address').optional().isString(),
+  body('department_id').optional().isInt(),
+  body('position_id').optional().isInt(),
+  body('hire_date').optional().isDate(),
+  body('status').optional().isIn(['active', 'on_leave', 'terminated', 'probation']),
+  body('bank_account').optional().isString(),
+  body('bank_name').optional().isString(),
+  body('tax_code').optional().isString(),
+  body('social_insurance_number').optional().isString(),
+];
+
+exports.updateEmployeeRules = [
+  body('full_name').optional().isString(),
+  body('date_of_birth').optional().isDate(),
+  body('gender').optional().isIn(['male', 'female', 'other']),
+  body('id_card_number').optional().isString(),
+  body('phone').optional().isString(),
+  body('email').optional().isEmail(),
+  body('address').optional().isString(),
+  body('permanent_address').optional().isString(),
+  body('department_id').optional().isInt(),
+  body('position_id').optional().isInt(),
+  body('hire_date').optional().isDate(),
+  body('termination_date').optional().isDate(),
+  body('status').optional().isIn(['active', 'on_leave', 'terminated', 'probation']),
+  body('bank_account').optional().isString(),
+  body('bank_name').optional().isString(),
+  body('tax_code').optional().isString(),
+  body('social_insurance_number').optional().isString(),
+];
