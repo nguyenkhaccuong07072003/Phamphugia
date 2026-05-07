@@ -8,6 +8,15 @@ import SubMenuPage from '../views/SubMenuPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
+  scrollBehavior(to, from, savedPosition) {
+    // Nếu có vị trí đã lưu (khi bấm back/forward trình duyệt), quay lại vị trí đó
+    if (savedPosition) {
+      return savedPosition
+    } else {
+      // Còn nếu là chuyển trang mới (như click từ footer), luôn cuộn lên đầu trang
+      return { top: 0, behavior: 'smooth' } // 'smooth' giúp cuộn mượt hơn, nếu muốn tức thì thì bỏ behavior đi
+    }
+  },
   routes: [
     {
       path: '/',
