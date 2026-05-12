@@ -1080,7 +1080,7 @@ function parseFormulaToUI(q: Question) {
                               <div v-for="(line, li) in getRowPatternPreview(q)" :key="li">{{ line }}</div>
                             </div>
                             <div class="text-xs text-green-600" style="margin-top:4px">
-                              Nếu cần thêm dòng, hệ thống sẽ tự nhân bản paragraph trong file Word.
+                              Nếu vùng chọn nằm trong bảng Word, hệ thống sẽ tự nhân bản/xóa dòng bảng; ngoài bảng thì sẽ nhân bản paragraph như cũ.
                             </div>
                           </div>
 
