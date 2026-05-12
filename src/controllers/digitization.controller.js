@@ -716,9 +716,9 @@ exports.submitForm = asyncHandler(async (req, res) => {
     if (q.type === "dynamic_table" && q.tableColumns) {
       const tableData = answers[q.key];
       if (!Array.isArray(tableData)) return;
-      for (const col of q.tableColumns) {
-        if (!col.textReplace || !col.valueMapping) continue;
-        for (const row of tableData) {
+      for (const row of tableData) {
+        for (const col of q.tableColumns) {
+          if (!col.textReplace || !col.valueMapping) continue;
           const rawVal = row ? row[col.key] : undefined;
           // If value is empty, keep original text (don't push replacement)
           if (rawVal == null || rawVal === "") {

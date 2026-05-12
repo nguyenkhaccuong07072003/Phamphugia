@@ -127,10 +127,7 @@ function classifyDots(fullText, matchIndex, matchLength, ctx = {}) {
           const prev2LineStart =
             fullText.lastIndexOf("\n", prev2LineEnd - 1) + 1;
           const prev2Line = fullText.substring(prev2LineStart, prev2LineEnd);
-          const prev2Stripped = prev2Line.replace(
-            /[.\s…,\-–—_*=~()\t]+/g,
-            "",
-          );
+          const prev2Stripped = prev2Line.replace(/[.\s…,\-–—_*=~()\t]+/g, "");
           const prev2HasDots = /[.…]{3,}|…+/.test(prev2Line);
           if (prev2Stripped.length >= 2 && !prev2HasDots) {
             return "blank";
@@ -658,6 +655,8 @@ function preprocessAnswers(answers) {
 function expandDynamicRows(xmlContent, expansions) {
   if (!expansions || expansions.length === 0) return xmlContent;
 
+  const tableIntervals = computeTableIntervals(xmlContent);
+
   // Extract paragraphs from XML: find each <w:p ...>...</w:p>
   const paraRegex = /<w:p[ >\/][\s\S]*?<\/w:p>/g;
   const paragraphs = []; // { start, end, xml, text }
@@ -674,6 +673,7 @@ function expandDynamicRows(xmlContent, expansions) {
       end: pm.index + pm[0].length,
       xml: pm[0],
       text,
+      inTable: isXmlPosInTable(pm.index, tableIntervals),
     });
   }
 
@@ -686,12 +686,50 @@ function expandDynamicRows(xmlContent, expansions) {
   }
   const fullText = paragraphs.map((p) => p.text).join("\n");
 
+  const rowRegex = /<w:tr\b[\s\S]*?<\/w:tr>/g;
+  const tableRows = [];
+  let rm;
+  while ((rm = rowRegex.exec(xmlContent)) !== null) {
+    const rowStart = rm.index;
+    const rowEnd = rm.index + rm[0].length;
+    const paraIndices = [];
+    for (let i = 0; i < paragraphs.length; i++) {
+      const para = paragraphs[i];
+      if (para.start >= rowStart && para.end <= rowEnd) paraIndices.push(i);
+    }
+    const firstPara =
+      paraIndices.length > 0 ? paragraphs[paraIndices[0]] : null;
+    const lastPara =
+      paraIndices.length > 0
+        ? paragraphs[paraIndices[paraIndices.length - 1]]
+        : null;
+    tableRows.push({
+      start: rowStart,
+      end: rowEnd,
+      xml: rm[0],
+      paraIndices,
+      tableIndex: tableIntervals.findIndex(
+        (it) => rowStart >= it.start && rowEnd <= it.end,
+      ),
+      textStart: firstPara ? firstPara.textStart : -1,
+      textEnd: lastPara ? lastPara.textEnd : -1,
+    });
+  }
+
   // Find all blanks in fullText (same classification logic as parseDocxBlanks)
   const dotsRegex = new RegExp(DOTS_RAW.source, "g");
   const allBlanks = []; // { start, end }
   let dm;
   while ((dm = dotsRegex.exec(fullText)) !== null) {
-    const cls = classifyDots(fullText, dm.index, dm[0].length);
+    let inTable = false;
+    for (let i = 0; i < paragraphs.length; i++) {
+      const para = paragraphs[i];
+      if (dm.index >= para.textStart && dm.index < para.textEnd + 1) {
+        inTable = !!para.inTable;
+        break;
+      }
+    }
+    const cls = classifyDots(fullText, dm.index, dm[0].length, { inTable });
     if (cls === "skip") continue;
     if (cls === "continuation") {
       if (allBlanks.length > 0) {
@@ -752,12 +790,64 @@ function expandDynamicRows(xmlContent, expansions) {
     const { startBlank, blanksPerRow, templateRows, extraRows } = exp;
     if (extraRows === 0) continue;
 
+    const findTableRowIndexForBlank = (blank) => {
+      for (let i = 0; i < tableRows.length; i++) {
+        const row = tableRows[i];
+        if (row.textStart < 0) continue;
+        if (blank.start >= row.textStart && blank.start <= row.textEnd + 1) {
+          return i;
+        }
+      }
+      return -1;
+    };
+
+    const getTableRowIndicesForTemplateRow = (rowIdx) => {
+      const rowIndices = new Set();
+      for (let col = 0; col < blanksPerRow; col++) {
+        const blankIdx = startBlank + rowIdx * blanksPerRow + col;
+        if (blankIdx >= expandedBlanks.length) continue;
+        const tableRowIdx = findTableRowIndexForBlank(expandedBlanks[blankIdx]);
+        if (tableRowIdx >= 0) rowIndices.add(tableRowIdx);
+      }
+      return [...rowIndices].sort((a, b) => a - b);
+    };
+
+    const startTableRowIdx =
+      startBlank >= 0 && startBlank < expandedBlanks.length
+        ? findTableRowIndexForBlank(expandedBlanks[startBlank])
+        : -1;
+    const hasContiguousTableBlock =
+      startTableRowIdx >= 0 &&
+      startTableRowIdx + templateRows - 1 < tableRows.length &&
+      tableRows
+        .slice(startTableRowIdx, startTableRowIdx + templateRows)
+        .every(
+          (row) => row.tableIndex === tableRows[startTableRowIdx].tableIndex,
+        );
+
     if (extraRows < 0) {
       // SHRINK: remove unused template rows from the end
       const rowsToRemove = Math.abs(extraRows);
+      if (hasContiguousTableBlock) {
+        const actualRows = templateRows + extraRows;
+        for (let rowIdx = templateRows - 1; rowIdx >= actualRows; rowIdx--) {
+          const row = tableRows[startTableRowIdx + rowIdx];
+          xmlContent =
+            xmlContent.slice(0, row.start) + xmlContent.slice(row.end);
+        }
+        continue;
+      }
+      const tableRowsToRemove = new Set();
       const parasToRemove = new Set();
       for (let r = 0; r < rowsToRemove; r++) {
         const rowIdx = templateRows - 1 - r;
+        const matchedTableRows = getTableRowIndicesForTemplateRow(rowIdx);
+        if (matchedTableRows.length > 0) {
+          for (const tableRowIdx of matchedTableRows) {
+            tableRowsToRemove.add(tableRowIdx);
+          }
+          continue;
+        }
         // Find ALL paragraphs containing any blank in this row
         for (let col = 0; col < blanksPerRow; col++) {
           const blankIdx = startBlank + rowIdx * blanksPerRow + col;
@@ -786,6 +876,15 @@ function expandDynamicRows(xmlContent, expansions) {
           }
         }
       }
+      if (tableRowsToRemove.size > 0) {
+        const sortedTableRows = [...tableRowsToRemove].sort((a, b) => b - a);
+        for (const tableRowIdx of sortedTableRows) {
+          const row = tableRows[tableRowIdx];
+          xmlContent =
+            xmlContent.slice(0, row.start) + xmlContent.slice(row.end);
+        }
+        continue;
+      }
       // Remove paragraphs in reverse order to preserve positions
       const sortedParas = [...parasToRemove].sort((a, b) => b - a);
       for (const paraIdx of sortedParas) {
@@ -793,6 +892,95 @@ function expandDynamicRows(xmlContent, expansions) {
         xmlContent =
           xmlContent.slice(0, para.start) + xmlContent.slice(para.end);
       }
+      continue;
+    }
+
+    if (hasContiguousTableBlock) {
+      const sourceRow = tableRows[startTableRowIdx + templateRows - 1];
+      let insertXml = "";
+      for (let r = 0; r < extraRows; r++) {
+        let clonedXml = sourceRow.xml;
+
+        const oldNum = templateRows;
+        const newNum = templateRows + r + 1;
+        let numReplaced = false;
+        clonedXml = clonedXml.replace(/<w:t[^>]*>[^<]*<\/w:t>/g, (tag) => {
+          if (numReplaced) return tag;
+          const textMatch = tag.match(/<w:t([^>]*)>([^<]*)<\/w:t>/);
+          if (!textMatch) return tag;
+          const attrs = textMatch[1];
+          const text = textMatch[2];
+          const subNumPattern = new RegExp(
+            `([\\.\\d]*\\.)(${oldNum})([.\\)\\s])`,
+            "",
+          );
+          if (subNumPattern.test(text)) {
+            const newText = text.replace(subNumPattern, `$1${newNum}$3`);
+            numReplaced = true;
+            return `<w:t${attrs}>${newText}</w:t>`;
+          }
+          const simpleNumPattern = new RegExp(`(^|\\s)(${oldNum})([.\\)])`, "");
+          if (simpleNumPattern.test(text)) {
+            const newText = text.replace(simpleNumPattern, `$1${newNum}$3`);
+            numReplaced = true;
+            return `<w:t${attrs}>${newText}</w:t>`;
+          }
+          return tag;
+        });
+
+        insertXml += clonedXml;
+      }
+
+      xmlContent =
+        xmlContent.slice(0, sourceRow.end) +
+        insertXml +
+        xmlContent.slice(sourceRow.end);
+      continue;
+    }
+
+    const matchedLastTableRows = getTableRowIndicesForTemplateRow(
+      templateRows - 1,
+    );
+    if (matchedLastTableRows.length > 0) {
+      const sourceRow = tableRows[matchedLastTableRows[0]];
+      let insertXml = "";
+      for (let r = 0; r < extraRows; r++) {
+        let clonedXml = sourceRow.xml;
+
+        const oldNum = templateRows;
+        const newNum = templateRows + r + 1;
+        let numReplaced = false;
+        clonedXml = clonedXml.replace(/<w:t[^>]*>[^<]*<\/w:t>/g, (tag) => {
+          if (numReplaced) return tag;
+          const textMatch = tag.match(/<w:t([^>]*)>([^<]*)<\/w:t>/);
+          if (!textMatch) return tag;
+          const attrs = textMatch[1];
+          const text = textMatch[2];
+          const subNumPattern = new RegExp(
+            `([\\.\\d]*\\.)(${oldNum})([.\\)\\s])`,
+            "",
+          );
+          if (subNumPattern.test(text)) {
+            const newText = text.replace(subNumPattern, `$1${newNum}$3`);
+            numReplaced = true;
+            return `<w:t${attrs}>${newText}</w:t>`;
+          }
+          const simpleNumPattern = new RegExp(`(^|\\s)(${oldNum})([.\\)])`, "");
+          if (simpleNumPattern.test(text)) {
+            const newText = text.replace(simpleNumPattern, `$1${newNum}$3`);
+            numReplaced = true;
+            return `<w:t${attrs}>${newText}</w:t>`;
+          }
+          return tag;
+        });
+
+        insertXml += clonedXml;
+      }
+
+      xmlContent =
+        xmlContent.slice(0, sourceRow.end) +
+        insertXml +
+        xmlContent.slice(sourceRow.end);
       continue;
     }
 
@@ -1367,6 +1555,75 @@ async function generateDocx(
 
   // Text replacements: find exact text in Word XML and replace sequentially
   // Handles text split across multiple <w:t> tags while preserving <w:tab/> boundaries
+  if (textReplacements && textReplacements.length > 0) {
+    const bySearchOrdered = {};
+    for (const tr of textReplacements) {
+      if (!bySearchOrdered[tr.search]) bySearchOrdered[tr.search] = [];
+      bySearchOrdered[tr.search].push(tr.replace);
+    }
+    for (const [searchText, replaceValues] of Object.entries(bySearchOrdered)) {
+      let replaceIdx = 0;
+      xmlContent = xmlContent.replace(/<w:p[ >][\s\S]*?<\/w:p>/g, (para) => {
+        if (replaceIdx >= replaceValues.length) return para;
+        let result = para;
+        let replacedInParagraph = true;
+        while (replacedInParagraph && replaceIdx < replaceValues.length) {
+          replacedInParagraph = false;
+          const segs = [];
+          const tRegex = /(<w:t[^>]*>)([^<]*)(<\/w:t>)/g;
+          let m;
+          while ((m = tRegex.exec(result)) !== null) {
+            if (segs.length > 0) {
+              const between = result.substring(
+                segs[segs.length - 1].end,
+                m.index,
+              );
+              if (between.includes("<w:tab/>")) {
+                segs.length = 0;
+              }
+            }
+            segs.push({
+              start: m.index,
+              end: m.index + m[0].length,
+              openTag: m[1],
+              text: m[2],
+              closeTag: m[3],
+            });
+            const joinedText = segs.map((s) => s.text).join("");
+            if (!joinedText.includes(searchText)) continue;
+
+            const nextText = joinedText.replace(
+              searchText,
+              replaceValues[replaceIdx++],
+            );
+            for (let i = segs.length - 1; i >= 0; i--) {
+              const seg = segs[i];
+              const newText = i === 0 ? nextText : "";
+              let replacement = seg.openTag + newText + seg.closeTag;
+              if (
+                newText &&
+                /^\s|\s$/.test(newText) &&
+                !replacement.includes('xml:space="preserve"')
+              ) {
+                replacement = replacement.replace(
+                  "<w:t",
+                  '<w:t xml:space="preserve"',
+                );
+              }
+              result =
+                result.substring(0, seg.start) +
+                replacement +
+                result.substring(seg.end);
+            }
+            replacedInParagraph = true;
+            break;
+          }
+        }
+        return result;
+      });
+    }
+    textReplacements = null;
+  }
   if (textReplacements && textReplacements.length > 0) {
     const bySearch = {};
     for (const tr of textReplacements) {

@@ -21,6 +21,47 @@ function enqueueConversion(fn) {
 const WORD_CONVERSION_TIMEOUT_MS =
   Number(process.env.WORD_CONVERSION_TIMEOUT_MS) || 120_000;
 
+function execFileAsync(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (err, stdout, stderr) => {
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function buildTimeoutError(err) {
+  const timedOut =
+    err.killed === true ||
+    err.code === "ETIMEDOUT" ||
+    err.signal === "SIGTERM" ||
+    err.signal === "SIGKILL";
+
+  if (timedOut) {
+    return new Error(
+      `docxToPdf timed out after ${WORD_CONVERSION_TIMEOUT_MS}ms`,
+    );
+  }
+
+  return null;
+}
+
+function formatExecError(prefix, err) {
+  const timeoutErr = buildTimeoutError(err);
+  if (timeoutErr) return timeoutErr;
+
+  const details = [err.message, err.stderr || "", err.stdout || ""]
+    .filter(Boolean)
+    .join("\n");
+
+  return new Error(`${prefix}: ${details}`);
+}
+
 function tryUnlinkSync(filePath) {
   try {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -63,64 +104,20 @@ async function docxToPdfImpl(inputPath, outputPath) {
 
   const tmpDir = os.tmpdir();
   const id = crypto.randomBytes(8).toString("hex");
-  const tempDocx = path.join(tmpDir, `phamphugia-docx-${id}.docx`);
-  const tempPdf = path.join(tmpDir, `phamphugia-out-${id}.pdf`);
-  const tempPs1 = path.join(tmpDir, `phamphugia-docpdf-${id}.ps1`);
+  const tempDocx = path.join(tmpDir, `maxcell-docx-${id}.docx`);
+  const tempPdf = path.join(tmpDir, `maxcell-out-${id}.pdf`);
+  const tempPs1 = path.join(tmpDir, `maxcell-docpdf-${id}.ps1`);
 
   fs.copyFileSync(inputPath, tempDocx);
 
   try {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-    // Word chỉ mở bản copy trong %TEMP% — file gốc trong uploads ít bị khóa / dialog "File In Use".
-    // PDF ghi ra temp trước, rồi copy sang đích (tránh Word giữ handle lên đường dẫn cuối).
-    const inputJson = JSON.stringify(tempDocx);
-    const outputJson = JSON.stringify(tempPdf);
-
-    // Không dùng $input / $output — là biến tự động trong PowerShell, dễ làm Open/Export sai.
-    // `-Command` multi-line trên Windows dễ lỗi → chạy bằng file .ps1 tạm.
-    const ps1Body = [
-      '$ErrorActionPreference = "Stop"',
-      `$inDocx = ${inputJson}`,
-      `$outPdf = ${outputJson}`,
-      "$word = New-Object -ComObject Word.Application",
-      "$word.Visible = $false",
-      "$word.DisplayAlerts = 0",
-      "$doc = $word.Documents.Open($inDocx)",
-      "$doc.ExportAsFixedFormat($outPdf, 17, $false) | Out-Null",
-      "$doc.Close() | Out-Null",
-      "$word.Quit() | Out-Null",
-      "",
-    ].join("\r\n");
-
-    fs.writeFileSync(tempPs1, ps1Body, "utf8");
-
-    await new Promise((resolve, reject) => {
-      execFile(
-        "powershell.exe",
-        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempPs1],
-        {
-          timeout: WORD_CONVERSION_TIMEOUT_MS,
-          maxBuffer: 20 * 1024 * 1024,
-          windowsHide: true,
-        },
-        (err, stdout, stderr) => {
-          if (err) {
-            const timedOut =
-              err.killed === true ||
-              err.code === "ETIMEDOUT" ||
-              err.signal === "SIGTERM" ||
-              err.signal === "SIGKILL";
-            const msg = timedOut
-              ? `docxToPdf timed out after ${WORD_CONVERSION_TIMEOUT_MS}ms`
-              : `DOCX->PDF conversion failed: ${err.message}\n${stderr || ""}\n${stdout || ""}`;
-            reject(new Error(msg));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
+    if (process.platform === "win32") {
+      await convertWithWordCom(tempDocx, tempPdf, tempPs1);
+    } else {
+      await convertWithLibreOffice(tempDocx, tempPdf);
+    }
 
     if (!fs.existsSync(tempPdf) || fs.statSync(tempPdf).size === 0) {
       throw new Error(`PDF not generated: ${tempPdf}`);
@@ -136,6 +133,96 @@ async function docxToPdfImpl(inputPath, outputPath) {
     tryUnlinkSync(tempPdf);
     tryUnlinkSync(tempPs1);
   }
+}
+
+async function convertWithWordCom(tempDocx, tempPdf, tempPs1) {
+  // Word chỉ mở bản copy trong %TEMP% — file gốc trong uploads ít bị khóa / dialog "File In Use".
+  // PDF ghi ra temp trước, rồi copy sang đích (tránh Word giữ handle lên đường dẫn cuối).
+  const inputJson = JSON.stringify(tempDocx);
+  const outputJson = JSON.stringify(tempPdf);
+
+  // Không dùng $input / $output — là biến tự động trong PowerShell, dễ làm Open/Export sai.
+  // `-Command` multi-line trên Windows dễ lỗi → chạy bằng file .ps1 tạm.
+  const ps1Body = [
+    '$ErrorActionPreference = "Stop"',
+    `$inDocx = ${inputJson}`,
+    `$outPdf = ${outputJson}`,
+    "$word = New-Object -ComObject Word.Application",
+    "$word.Visible = $false",
+    "$word.DisplayAlerts = 0",
+    "$doc = $word.Documents.Open($inDocx)",
+    "$doc.ExportAsFixedFormat($outPdf, 17, $false) | Out-Null",
+    "$doc.Close() | Out-Null",
+    "$word.Quit() | Out-Null",
+    "",
+  ].join("\r\n");
+
+  fs.writeFileSync(tempPs1, ps1Body, "utf8");
+
+  try {
+    await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", tempPs1],
+      {
+        timeout: WORD_CONVERSION_TIMEOUT_MS,
+        maxBuffer: 20 * 1024 * 1024,
+        windowsHide: true,
+      },
+    );
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      throw new Error(
+        "DOCX->PDF conversion failed: powershell.exe not found on this Windows host",
+      );
+    }
+    throw formatExecError("DOCX->PDF conversion failed", err);
+  }
+}
+
+async function convertWithLibreOffice(tempDocx, tempPdf) {
+  const outDir = path.dirname(tempPdf);
+  const targetPdf = path.join(
+    outDir,
+    `${path.basename(tempDocx, ".docx")}.pdf`,
+  );
+  const commands = ["soffice", "libreoffice"];
+  let lastError = null;
+
+  for (const command of commands) {
+    try {
+      await execFileAsync(
+        command,
+        [
+          "--headless",
+          "--convert-to",
+          "pdf:writer_pdf_Export",
+          "--outdir",
+          outDir,
+          tempDocx,
+        ],
+        {
+          timeout: WORD_CONVERSION_TIMEOUT_MS,
+          maxBuffer: 20 * 1024 * 1024,
+        },
+      );
+
+      if (targetPdf !== tempPdf && fs.existsSync(targetPdf)) {
+        fs.renameSync(targetPdf, tempPdf);
+      }
+      return;
+    } catch (err) {
+      lastError = err;
+      if (err.code !== "ENOENT") break;
+    }
+  }
+
+  if (lastError && lastError.code === "ENOENT") {
+    throw new Error(
+      "DOCX->PDF conversion failed: LibreOffice is not installed in this container/host",
+    );
+  }
+
+  throw formatExecError("DOCX->PDF conversion failed", lastError);
 }
 
 module.exports = { docxToPdf };
