@@ -188,12 +188,21 @@ async function convertWithLibreOffice(tempDocx, tempPdf) {
   const commands = ["soffice", "libreoffice"];
   let lastError = null;
 
+  // Tạo một đường dẫn profile tạm thời dựa trên tên file để cô lập môi trường render
+  const profileDir = path.join(
+    os.tmpdir(),
+    `libre_profile_${path.basename(tempDocx, ".docx")}`,
+  );
+
   for (const command of commands) {
     try {
       await execFileAsync(
         command,
         [
           "--headless",
+          "--invisible",
+          // Ép LibreOffice dùng profile sạch để giữ nguyên định dạng bảng và lề trang
+          `-env:UserInstallation=file://${profileDir}`,
           "--convert-to",
           "pdf:writer_pdf_Export",
           "--outdir",
@@ -209,9 +218,19 @@ async function convertWithLibreOffice(tempDocx, tempPdf) {
       if (targetPdf !== tempPdf && fs.existsSync(targetPdf)) {
         fs.renameSync(targetPdf, tempPdf);
       }
+
+      // Xóa folder profile tạm sau khi xong để giải phóng dung lượng
+      try {
+        fs.rmSync(profileDir, { recursive: true, force: true });
+      } catch (e) {}
+
       return;
     } catch (err) {
       lastError = err;
+      // Dọn dẹp profile nếu lỗi xảy ra
+      try {
+        fs.rmSync(profileDir, { recursive: true, force: true });
+      } catch (e) {}
       if (err.code !== "ENOENT") break;
     }
   }
