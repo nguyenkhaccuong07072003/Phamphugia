@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-//import Editor from '@tinymce/tinymce-vue'
+import Editor from '@tinymce/tinymce-vue'
 import api from '../../api'
 
 interface Category {
@@ -57,40 +57,38 @@ const totalItems = ref(0)
 const perPage = ref(15)
 const perPageOptions = [10, 15, 25, 50]
 
-//const tinymceApiKey = import.meta.env.VITE_TINYMCE_API_KEY || ''
+const tinymceScriptSrc = `https://cdn.tiny.cloud/1/${import.meta.env.VITE_TINYMCE_API_KEY}/tinymce/8/tinymce.min.js`
 
-
-// const tinymceConfig = {
-//   height: 400,
-//   menubar: false,
-//   plugins: 'lists image code fullscreen autolink',
-//   toolbar: 'undo redo | fontfamily fontsize | bold italic underline | alignleft aligncenter alignright alignjustify | bullist numlist | customImageUpload | fullscreen code',
-//   font_family_formats: 'Times New Roman=times new roman,times,serif;Arial=arial,helvetica,sans-serif',
-//   font_size_formats: '8pt 9pt 10pt 11pt 12pt 14pt 16pt 18pt 20pt 22pt 24pt 26pt 28pt 36pt 48pt 72pt',
-//   browser_spellcheck: true,
-//   resize: true,
-//   toolbar_sticky: true,
-//   content_style: 'body { font-family: "Times New Roman", Times, serif; font-size: 14pt; line-height: 1.5; padding: 12px; }',
-//   automatic_uploads: true,
-//   paste_data_images: true,
-//   images_upload_handler: async (blobInfo: any) => uploadEditorImage(blobInfo.blob()),
-//   file_picker_types: 'image',
-//   file_picker_callback: (_callback: any, _value: string, meta: any) => {
-//     if (meta.filetype === 'image') {
-//       triggerEditorImageInput()
-//     }
-//   },
-//   setup: (editor: any) => {
-//     currentEditor.value = editor
-//     editor.ui.registry.addButton('customImageUpload', {
-//       text: 'Tải ảnh',
-//       tooltip: 'Tải ảnh vào nội dung',
-//       onAction: () => triggerEditorImageInput(),
-//     })
-//   },
-//   branding: false,
-//   promotion: false,
-// }
+const tinymceConfig = {
+  api_key: import.meta.env.VITE_TINYMCE_API_KEY,
+  height: 250,
+  menubar: true,
+  plugins: 'paste lists code fullscreen table wordcount',
+  toolbar: 'undo redo | formatselect | bold italic underline | alignleft aligncenter alignright | bullist numlist | table | code | fullscreen',
+  toolbar_sticky: false,
+  content_style: `
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+  `,
+  paste_as_text: false,
+  paste_enable_default_filters: true,
+  paste_word_valid_elements: 'p,br,h1,h2,h3,h4,h5,h6,b,strong,i,em,u,s,sub,sup,table,tr,th,td,ul,ol,li,dl,dt,dd,span,div,colgroup,col,tbody,thead,tfoot',
+  paste_data_images: false,
+  relative_urls: false,
+  remove_script_host: false,
+  convert_urls: true,
+  branding: false,
+  promotion: false,
+  language: 'vi',
+}
 
 const form = ref({
   title: '',
@@ -700,8 +698,8 @@ function moveBlockDown(index: number) {
                           </button>
                         </div>
                       </div>
-                      <button v-else type="button" class="upload-area h-25"
-                        @click="triggerBlockImageInput(block.id)" :disabled="blockUploading[block.id]">
+                      <button v-else type="button" class="upload-area h-25" @click="triggerBlockImageInput(block.id)"
+                        :disabled="blockUploading[block.id]">
                         <span v-if="blockUploading[block.id]"
                           class="material-icon animate-spin text-sm">progress_activity</span>
                         <span v-else class="material-icon text-2xl text-slate-400">cloud_upload</span>
@@ -711,12 +709,13 @@ function moveBlockDown(index: number) {
                       </button>
                     </div>
 
-                    <!-- Block Specifications -->
+                    <!-- Block Specifications with TinyMCE Editor -->
                     <div class="px-4 py-3 border-t border-gray-200">
                       <label class="form-label text-xs">Thông số kỹ thuật</label>
-                      <textarea v-model="block.specifications"
-                        placeholder="Nhập thông số, ví dụ:&#10;- Vật liệu: ...&#10;- Kích thước: ..."
-                        class="form-input h-25 resize-none text-xs"></textarea>
+                      <div class="tinymce-wrapper">
+                        <Editor v-model="block.specifications" :init="tinymceConfig"
+                          :tinymceScriptSrc="tinymceScriptSrc" />
+                      </div>
                     </div>
                   </div>
 
@@ -1413,5 +1412,25 @@ function moveBlockDown(index: number) {
 .action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* TinyMCE Editor Container - Fix table overflow */
+.tinymce-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 0.375rem;
+}
+
+:deep(.tox-tinymce) {
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+:deep(.tox-editor-container) {
+  max-width: 100% !important;
+}
+
+:deep(.mce-content-body) {
+  max-width: 100% !important;
 }
 </style>

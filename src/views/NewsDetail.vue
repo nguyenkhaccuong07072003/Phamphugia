@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { publicApi } from '../api'
-import { isProductCategory, type ArticleCategory } from '../utils/article'
+import { type ArticleCategory } from '../utils/article'
 
 interface CatalogueBlock {
   id: string
@@ -45,7 +45,6 @@ const loading = ref(true)
 const error = ref(false)
 const selectedGalleryImage = ref<string | null>(null)
 
-const isProduct = computed(() => isProductCategory(article.value?.category?.name))
 const hasCatalogueBlocks = computed(() =>
   Array.isArray(article.value?.catalogue_blocks) && article.value.catalogue_blocks.length > 0
 )
@@ -58,11 +57,6 @@ const galleryImages = computed(() => {
 
   return Array.from(new Set(rawImages))
 })
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
 
 
 async function loadArticle(slug: string) {
@@ -127,7 +121,7 @@ watch(() => route.params.slug, (newSlug) => {
             {{ article.title }}
           </h1>
 
-          <div class="flex flex-wrap items-center gap-4 text-sm text-gray-500 mb-6 max-sm:mb-4">
+          <!-- <div class="flex flex-wrap items-center gap-4 text-sm text-gray-500 mb-6 max-sm:mb-4">
             <span v-if="article.author && !isProduct" class="flex items-center gap-1.5">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
@@ -154,7 +148,7 @@ watch(() => route.params.slug, (newSlug) => {
               </svg>
               {{ article.view_count }} lượt xem
             </span>
-          </div>
+          </div> -->
 
           <!-- Catalogue Blocks (Product Listing with 2/3 + 1/3 layout) -->
           <div v-if="hasCatalogueBlocks" class="mt-5 mb-8 flex flex-col gap-7.5">
@@ -185,11 +179,8 @@ watch(() => route.params.slug, (newSlug) => {
                   Thông số kỹ thuật
                 </h3>
 
-                <div class="p-6 flex-1 bg-gray-50">
-                  <div
-                    class="whitespace-pre-line m-0 font-sans text-gray-700 text-sm leading-relaxed text-left px-3.75! block w-full">
-                    {{ article.specifications?.trim() || block.specifications?.trim() }}
-                  </div>
+                <div class="p-6 flex-1 bg-gray-50 overflow-x-auto">
+                  <div v-html="article.specifications?.trim() || block.specifications?.trim()"></div>
                 </div>
               </div>
             </section>
