@@ -322,7 +322,7 @@ exports.getNewsGroupedByCategory = asyncHandler(async (req, res) => {
         "published_at",
       ],
       order: [["published_at", "DESC"]],
-      limit: 10,
+      limit: 50,
     });
     
     if (items.length > 0) {
